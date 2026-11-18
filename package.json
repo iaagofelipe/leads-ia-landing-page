@@ -1,0 +1,13 @@
+{
+  "name": "lead-preview-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PoC de prospecção local com Google Places API + auditoria de site + geração de landing page preview",
+  "scripts": {
+    "start": "node src/cli.js",
+    "osm": "node src/cli.js --osm",
+    "demo": "node src/cli.js --demo",
+    "serve": "node src/server.js"
+  }
+}

@@ -1,0 +1,95 @@
+# Histórico, Decisões e Próximos Passos — PoC Prospecção + Landing Page Preview
+
+Este documento registra toda a evolução da PoC criada em `lead-preview-poc`, as decisões técnicas e de negócio tomadas até aqui, as limitações identificadas e o plano de melhorias para os próximos passos.
+
+---
+
+## 1. Objetivo e Estratégia Comercial Definida
+
+O projeto nasceu da ideia de unir **prospecção ativa automatizada**, **auditoria técnica** e **entrega de valor antecipada** para vender serviços de desenvolvimento freelancer com **receita recorrente**:
+
+1. **Isca de "Prévia Pronta" (Ponto 1):** em vez de abordar negócios locais com texto genérico ("quer fazer um site?"), o sistema gera automaticamente uma landing page demonstrativa já personalizada com o nome, endereço, horários e WhatsApp do estabelecimento.
+2. **Auditoria Técnica de Sites Existentes (Ponto 2):** além de negócios sem site ou com apenas link de rede social/Linktree, o sistema audita sites existentes para detectar problemas objetivos que fazem o cliente perder contatos (site fora do ar/404, sem HTTPS, sem `meta viewport` mobile, lentidão ou ausência de link para WhatsApp).
+3. **Oferta com Recorrência (Ponto 3):** não vender apenas "um arquivo HTML avulso", mas uma **Página de Captação Gerenciada** (setup de entrada + mensalidade acessível cobrindo hospedagem, SSL, monitoramento, ajustes mensais e manutenção do canal de WhatsApp/captação).
+
+---
+
+## 2. Histórico do Que Foi Construído e Decisões Técnicas
+
+### 2.1. Nicho Inicial e Stack da PoC
+- **Nicho escolhido para validação:** **Clínicas Odontológicas & Estética** (ticket médio alto e forte aderência à recorrência mensal).
+- **Stack escolhida:** **Node.js v20+ (ESM)** puro, **zero dependências externas**, estruturado para rodar rápido e sem passo de build:
+  - `src/env.js`: carregador leve de variáveis do `.env`.
+  - `src/places.js`: camada de busca de estabelecimentos (Google Places API New, OpenStreetMap e modo `--demo`).
+  - `src/audit.js`: auditor técnico de `websiteUri` + cálculo de score/prioridade (`alta`, `media`, `baixa`).
+  - `src/preview-generator.js`: geração do HTML da landing page por clínica, mensagem personalizada (`pitch`) conforme o diagnóstico e painel local (`output/index.html`).
+  - `src/cli.js`: orquestrador do pipeline (`npm start`, `npm run osm`, `npm run demo`).
+  - `src/server.js`: servidor HTTP local (`npm run serve`) servindo `output/` em `http://127.0.0.1:3000`.
+- **Localização do projeto:** movido para `D:\Projetos\lead-preview-poc`.
+
+### 2.2. Fontes de Dados: Google Places API vs. OpenStreetMap
+- **Google Places API (New):**
+  - A integração com `https://places.googleapis.com/v1/places:searchText` foi implementada em `src/places.js` (trazendo nome, endereço, telefone, `websiteUri`, `rating`, `userRatingCount`, `googleMapsUri` e horários).
+  - **Descoberta durante os testes:** chaves geradas no **Google AI Studio** (formato `AQ.Ab8...`) servem apenas para a Gemini API e retornam `401 UNAUTHENTICATED` na Places API. A Places API exige chave padrão do **Google Cloud Console** (`AIza...`) com a **Places API (New)** e faturamento habilitados. (A chave testada para Gemini também retornou `403 PERMISSION_DENIED` no endpoint `gemini-flash-latest:generateContent`.)
+  - **Decisão:** manter o conector do Google Places pronto para uso quando a chave `AIza...` for configurada no `.env`, mas implementar imediatamente uma fonte gratuita e sem necessidade de API Key para não travar a PoC.
+- **Conector Gratuito OpenStreetMap (Overpass -> Nominatim + Photon):**
+  - Tentativa inicial com espelhos públicos da **Overpass API** (`overpass-api.de`, `overpass.kumi.systems`, `overpass.private.coffee`) apresentou instabilidade severa (`429`, `502 Gateway Timeout` por fila cheia e timeouts).
+  - **Decisão:** substituir por **Nominatim (`/search` + `/lookup`) + Photon (`photon.komoot.io/api/`)** com timeouts explícitos (`AbortSignal.timeout(10000)`), filtragem de POIs comerciais relevantes e deduplicação por ID/nome. Essa combinação respondeu em poucos segundos.
+
+### 2.3. Validação Real em Fortaleza-CE
+- Configurada a busca padrão `DEFAULT_QUERY=clinica odontologica em Fortaleza CE` no `.env`.
+- Ajustada a função `extractCity()` em `src/preview-generator.js` para extrair corretamente o nome da cidade em formatos como `Rua X, 241 • Fátima • Fortaleza - Ceará`.
+- **Resultado da execução real (`npm start`):**
+  - 10 clínicas reais analisadas em Fortaleza-CE.
+  - 9 sem site cadastrado (`NO_WEBSITE`) e 1 (`Clínica Odontológica Ortoclin`) com site retornando erro **HTTP 404** (`SITE_ISSUES`).
+  - Todas as prévias e mensagens de abordagem geradas e visualizadas no painel local (`http://127.0.0.1:3000`).
+
+---
+
+## 3. Pontos Críticos Identificados na Revisão da PoC
+
+Durante a visualização prática das páginas geradas no navegador, foram levantados dois gargalos reais que impedem ir direto para venda em escala no estado atual:
+
+1. **Uso de `localhost:3000` nas mensagens:**
+   - `http://localhost:3000` só existe localmente na máquina de desenvolvimento e nunca pode ser enviado a um cliente real.
+   - O `src/cli.js` já prevê a variável `PREVIEW_BASE_URL`, mas ainda falta hospedar `output/` em uma URL pública real.
+2. **Landing pages visualmente iguais (risco de "site clonado"):**
+   - Na v1 da PoC foi usado apenas 1 template fixo e os mesmos 4 cards genéricos de tratamentos para todas as clínicas.
+   - Se múltiplos estabelecimentos da mesma cidade receberem o link, as páginas parecem idênticas e reduzem a percepção de valor e exclusividade.
+
+*(Limitação adicional do modo gratuito atual: o OpenStreetMap não traz nota de estrelas nem quantidade de avaliações do Google, que ajudam a priorizar clínicas mais ativas.)*
+
+---
+
+## 4. Melhorias Propostas
+
+### 4.1. Variedade Visual Real (Sistema Multi-Temas)
+- Criar **3 a 4 layouts estruturalmente distintos** em `src/preview-generator.js` (não apenas troca de cor, mas variação de disposição do hero, seções, tipografia e estilo):
+  1. *Clínico Clean* (azul/teal claro, foco em confiança e família);
+  2. *Editorial Sofisticado* (tons neutros/areia/dourado, foco em estética e harmonização);
+  3. *Moderno Alto Contraste* (fundo escuro + verde/esmeralda, foco em tecnologia e implantes);
+  4. *Acolhedor Minimalista* (cards amplos, foco em atendimento humanizado).
+- Selecionar ou alternar o tema de forma determinística por clínica (ou por subnicho detectado no nome).
+
+### 4.2. Personalização Semântica de Conteúdo (Regras + IA)
+- Detectar o foco provável pelo nome/categoria (ex.: `Ortoclin` -> Ortodontia/Alinhadores; `Harmony` -> Harmonização Facial & Estética; `Implantes` -> Reabilitação Oral) para gerar **headline, lista de especialidades e argumentos próprios**.
+- Integrar **Gemini API** (opcional no `.env` via `GEMINI_API_KEY`) para gerar copy única e natural para cada clínica, mantendo fallback determinístico caso não haja chave configurada.
+
+### 4.3. Publicação Pública Automática das Prévias
+- Subir a pasta `output/` (HTML estático puro) gratuitamente em **Cloudflare Pages**, **Vercel** ou **Netlify**, vinculada a um subdomínio próprio (ex.: `https://preview.seudominio.com.br`).
+- Configurar `PREVIEW_BASE_URL=https://preview.seudominio.com.br` no `.env` para que todas as prévias e mensagens de abordagem saiam com links públicos reais.
+
+### 4.4. Melhoria na Qualidade dos Leads e Abordagem Segura
+- Habilitar **Google Places API (New)** no Google Cloud Console (chave `AIza...`) para filtrar apenas clínicas ativas com boa reputação (ex.: `rating >= 4.2` e mínimo de avaliações) e exibir prova social real na prévia.
+- **Regra anti-bloqueio na prospecção:** não enviar link na primeira mensagem fria pelo WhatsApp; perguntar primeiro se há interesse em ver a prévia montada e só enviar a URL após resposta positiva.
+- Adicionar opção de limpar arquivos antigos em `output/previews/` a cada execução e suportar outros nichos via templates modulares.
+
+---
+
+## 5. Próximos Passos Imediatos
+
+1. **[ ] Evoluir o gerador de landing pages:** implementar 3–4 layouts/paletas distintos + adaptação de especialidades por nome/perfil da clínica.
+2. **[ ] Configurar hospedagem pública para prévias:** publicar `output/` em Cloudflare Pages / Vercel com domínio próprio e atualizar `PREVIEW_BASE_URL` no `.env`.
+3. **[ ] Testar validação comercial manual (20–30 leads em Fortaleza-CE):** enviar abordagens cadenciadas sem automação cega para validar taxa de resposta e modelo de preço (setup + mensalidade).
+4. **[ ] (Opcional) Ativar Google Places API (New) e Gemini API:** gerar chave `AIza...` no Google Cloud para enriquecer leads com avaliações reais e copy gerada por IA.
+5. **[ ] Definir checklist padrão de entrega pós-venda:** troca para domínio do cliente, inserção de logo/fotos reais, configuração de WhatsApp/formulário e rotina de suporte mensal.
